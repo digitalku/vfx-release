@@ -4,6 +4,7 @@ import subprocess
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
+__version__ = "1.1"
 
 # ── Design Tokens — sesuai HTML metatrader_manager_ui.html ────────────────────
 BG          = "#0d1114"   # --bg
@@ -557,6 +558,8 @@ class MTManager:
                  font=(f, 11, "bold")).pack(side="left")
         tk.Label(title_frame, text=" Manager \u2014 Linux Edition",
                  bg=BG2, fg=FG2, font=(f, 11)).pack(side="left")
+        tk.Label(title_frame, text=f"  v{__version__}", bg=BG2, fg=FG3,
+                 font=(f, 9)).pack(side="left", pady=(3, 0))
 
         # ════════════════════════════════════════════════════════════════
         # BODY  — sidebar + main
