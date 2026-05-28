@@ -554,9 +554,9 @@ class MTManager:
         # Title text
         title_frame = tk.Frame(tb_inner, bg=BG2)
         title_frame.pack(side="left", padx=10, fill="y")
-        tk.Label(title_frame, text="MetaTrader", bg=BG2, fg=ACCENT,
+        tk.Label(title_frame, text="MT", bg=BG2, fg=ACCENT,
                  font=(f, 11, "bold")).pack(side="left")
-        tk.Label(title_frame, text=" Manager \u2014 Linux Edition",
+        tk.Label(title_frame, text=" Manager \u2014 digiOS by Digitalku",
                  bg=BG2, fg=FG2, font=(f, 11)).pack(side="left")
         tk.Label(title_frame, text=f"  v{__version__}", bg=BG2, fg=FG3,
                  font=(f, 9)).pack(side="left", pady=(3, 0))
