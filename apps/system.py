@@ -113,6 +113,32 @@ FONT_MONO   = ("JetBrains Mono", "Cascadia Mono", "SF Mono", "Consolas",
 SIDEBAR_W   = 250
 
 
+# ── Disk helpers ────────────────────────────────────────────────────────────────
+def disk_usage(path=None) -> tuple:
+    """Return (free_bytes, total_bytes) untuk partisi yang memuat `path`.
+    Bila path None/tidak ada, naik ke ancestor terdekat; fallback ke home."""
+    try:
+        target = Path(path) if path else ALLOWED_ROOT
+        while not target.exists() and target != target.parent:
+            target = target.parent
+        if not target.exists():
+            target = ALLOWED_ROOT
+        u = shutil.disk_usage(str(target))
+        return u.free, u.total
+    except Exception:
+        return 0, 0
+
+
+def fmt_disk(n: int) -> str:
+    """Bytes → string ringkas (GB/TB)."""
+    gb = n / (1024 ** 3)
+    if gb >= 1024:
+        return f"{gb / 1024:.1f} TB"
+    if gb >= 10:
+        return f"{gb:.0f} GB"
+    return f"{gb:.1f} GB"
+
+
 # ── Archive helpers ────────────────────────────────────────────────────────────
 def is_archive(path: Path) -> bool:
     name = path.name.lower()

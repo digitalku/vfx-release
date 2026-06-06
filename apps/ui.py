@@ -10,6 +10,7 @@ import tkinter.font as tkf
 from tkinter import ttk
 from pathlib import Path
 import shutil
+import webbrowser
 
 import system as be
 from widgets import (
@@ -56,6 +57,7 @@ class MTManager:
         self._build_styles()
         self._build_ui()
         self.scan_terminals(silent=True)
+        self.root.after(400, self._disk_poll)
         self.root.after(2000, self._autostart_sync_poll)
         if self.auto_update_var.get():
             self.root.after(800, self._auto_update_check)
@@ -526,6 +528,19 @@ class MTManager:
         self.status_var = tk.StringVar(value="Tekan Scan untuk mendeteksi terminal.")
         self._mk_status_item(sb_inner, "0 terminal", ACCENT, dot=True, varname="_term_count_var")
 
+        # ── Disk space (drive terminal terpilih, fallback home) ──
+        disk_fr = tk.Frame(sb_inner, bg=BG2)
+        disk_fr.pack(side="left", padx=(6, 0), fill="y")
+        tk.Label(disk_fr, text="DISK", bg=BG2, fg=FG3,
+                 font=(self._font, 8)).pack(side="left", padx=(0, 6), pady=10)
+        self._disk_bar = ProgressBar(disk_fr, height=4, bg=BG4, fill=ACCENT3)
+        self._disk_bar.config(width=64)
+        self._disk_bar.pack(side="left", pady=12)
+        self._disk_var = tk.StringVar(value="—")
+        tk.Label(disk_fr, textvariable=self._disk_var, bg=BG2, fg=FG3,
+                 font=(self._font_mono, 8)).pack(side="left", padx=(8, 0))
+        Tooltip(disk_fr, "Sisa ruang disk pada drive terminal terpilih")
+
         self.auto_update_var = tk.BooleanVar(value=self._cfg.get("auto_update", True))
 
         def _on_auto_update_toggle():
@@ -580,6 +595,16 @@ class MTManager:
         _rh2  = _fnt2.metrics("linespace") + 3 * 2
         update_c.config(width=_rw, height=_rh2)
 
+        # \u2500\u2500 Branding: digitalku.com (clickable) \u2500\u2500
+        brand = tk.Label(sb_inner, text="digitalku.com", bg=BG2, fg=FG3,
+                         font=(self._font, 8), cursor="hand2")
+        brand.pack(side="right", padx=(0, 14), fill="y")
+        brand.bind("<Button-1>",
+                   lambda e: webbrowser.open("https://www.digitalku.com"))
+        brand.bind("<Enter>", lambda e: brand.config(fg=ACCENT))
+        brand.bind("<Leave>", lambda e: brand.config(fg=FG3))
+        Tooltip(brand, "Buka https://www.digitalku.com", position="above")
+
     # ── Status helpers ────────────────────────────────────────────────────────
     def _mk_status_item(self, parent, text, color, dot=False, icon=None,
                         side="left", varname=None):
@@ -601,6 +626,31 @@ class MTManager:
 
     def _status(self, msg):
         self.status_var.set(msg)
+
+    def _refresh_disk(self, path=None):
+        free, total = be.disk_usage(path)
+        if total <= 0:
+            self._disk_var.set("—")
+            self._disk_bar._fill = BORDER2
+            self._disk_bar._pct  = -1.0
+            self._disk_bar.set(0.0)
+            return
+        free_frac = free / total
+        if free_frac < 0.10:
+            color = DANGER
+        elif free_frac < 0.20:
+            color = WARN
+        else:
+            color = ACCENT3
+        self._disk_bar._fill = color
+        self._disk_bar._pct  = -1.0          # paksa redraw dengan warna baru
+        self._disk_bar.set(1.0 - free_frac)
+        self._disk_var.set(f"{be.fmt_disk(free)} free / {be.fmt_disk(total)}")
+
+    def _disk_poll(self):
+        t = self._terminal(silent=True)
+        self._refresh_disk(t["path"] if t else None)
+        self.root.after(60000, self._disk_poll)
 
     def _draw_scan_btn(self, _=None, hover=False):
         c = self._scan_canvas
@@ -675,6 +725,7 @@ class MTManager:
         if path_str.startswith(home):
             path_str = "~" + path_str[len(home):]
         self._info_fields["path"][0].set(path_str)
+        self._refresh_disk(t["path"])
         self._status(f"Path: {t['path']}")
 
     # ── File list ─────────────────────────────────────────────────────────────
