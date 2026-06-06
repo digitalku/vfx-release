@@ -533,9 +533,9 @@ class MTManager:
         disk_fr.pack(side="left", padx=(6, 0), fill="y")
         tk.Label(disk_fr, text="DISK", bg=BG2, fg=FG3,
                  font=(self._font, 8)).pack(side="left", padx=(0, 6), pady=10)
-        self._disk_bar = ProgressBar(disk_fr, height=4, bg=BG4, fill=ACCENT3)
-        self._disk_bar.config(width=64)
-        self._disk_bar.pack(side="left", pady=12)
+        self._disk_bar = ProgressBar(disk_fr, height=6, bg=BORDER2, fill=ACCENT3)
+        self._disk_bar.config(width=70)
+        self._disk_bar.pack(side="left", pady=11)
         self._disk_var = tk.StringVar(value="—")
         tk.Label(disk_fr, textvariable=self._disk_var, bg=BG2, fg=FG3,
                  font=(self._font_mono, 8)).pack(side="left", padx=(8, 0))
