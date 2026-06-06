@@ -1,5 +1,5 @@
 """
-ui.py — MT Manager
+ui.py — MT Manager Digitalku
 Kelas MTManager: membangun UI tkinter dan menangani event.
 Semua logika bisnis didelegasikan ke system.py.
 Semua widget custom diimport dari widgets.py.
