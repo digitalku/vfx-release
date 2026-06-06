@@ -205,7 +205,7 @@ class MTManager:
         mt_wrap = tk.Frame(sidebar, bg=BG2, padx=10)
         mt_wrap.pack(fill="x", pady=(0, 12))
         mt_holder, _mt_canvas = make_pill_btn(
-            mt_wrap, "\u2699  Add / Manage MT", self._manage_mt_menu,
+            mt_wrap, "\u2699  Add / Remove MT", self._manage_mt_menu,
             bg=BG3, fg="#5ecf3e", hover_bg=BG4,
             font_size=10, padx=12, pady=8, radius=8, fill_x=True)
         mt_holder.pack(fill="x")
