@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from urllib.request import urlopen, Request
 
-__version__ = "1.3"
+__version__ = "1.3a"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path.home() / ".config" / "mt_manager" / "settings.json"
@@ -127,9 +127,9 @@ def extract_file(path: Path, dest_dir: Path) -> tuple[bool, str]:
             if r.returncode == 0:
                 return True, ""
             return False, r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "exit != 0"
-        # fallback: Python zipfile
+        # fallback: Python zipfile (lazy import)
         if path.suffix == ".zip":
-            import zipfile
+            import zipfile  # noqa: PLC0415 — intentional lazy import
             with zipfile.ZipFile(path, "r") as zf:
                 zf.extractall(dest_dir)
             return True, ""
@@ -180,12 +180,23 @@ POPUP_ICONS = {
 
 # ── Installer detection ───────────────────────────────────────────────────────
 def detect_installer_type(exe_path: Path) -> str:
-    """Baca byte header .exe untuk deteksi Inno Setup vs NSIS vs unknown."""
+    """Baca byte header .exe untuk deteksi Inno Setup vs NSIS vs unknown.
+    Hanya baca 8 KB pertama — signature selalu ada di awal file.
+    """
+    _READ_SIZE = 8192
     try:
-        data = exe_path.read_bytes()
-        if b"Inno Setup" in data[:65536]:
+        with exe_path.open("rb") as fh:
+            data = fh.read(_READ_SIZE)
+        if b"Inno Setup" in data:
             return "inno"
-        if b"Nullsoft" in data[:65536] or b"NSIS" in data[:65536]:
+        if b"Nullsoft" in data or b"NSIS" in data:
+            return "nsis"
+        # Fallback: cek sisa sampai 64 KB jika tidak ditemukan di 8 KB pertama
+        with exe_path.open("rb") as fh:
+            data = fh.read(65536)
+        if b"Inno Setup" in data:
+            return "inno"
+        if b"Nullsoft" in data or b"NSIS" in data:
             return "nsis"
     except Exception:
         pass
@@ -329,8 +340,15 @@ def run_mt_installer_bg(installer_path: Path, qty: int, base_name: str = "",
 def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
                         qty: int, mt_type: str,
                         on_copy_progress=None, on_launch_progress=None,
-                        on_finish=None, cancelled_flag: list = None):
-    """Copy src_folder ke linux_base/<base_name> N di background thread."""
+                        on_finish=None, cancelled_flag: list = None,
+                        custom_names: list = None):
+    """Copy src_folder ke linux_base/<nama> N di background thread.
+
+    custom_names: list of str dengan panjang qty — nama folder tiap duplikat.
+                  Jika None atau elemen kosong, pakai nama default "<base_name> N".
+    Launch MT hanya dilakukan SETELAH semua copy selesai, atau terhadap yang
+    sudah ter-copy jika dibatalkan di tengah jalan.
+    """
     if cancelled_flag is None:
         cancelled_flag = [False]
 
@@ -342,8 +360,13 @@ def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
         for i in range(qty):
             if cancelled_flag[0]:
                 break
-            num      = i + 2
-            dst_name = f"{base_name} {num}"
+
+            # Tentukan nama folder: custom jika ada, default jika tidak
+            if custom_names and i < len(custom_names) and custom_names[i].strip():
+                dst_name = custom_names[i].strip()
+            else:
+                dst_name = f"{base_name} {i + 2}"
+
             dst_path = linux_base / dst_name
             if on_copy_progress:
                 on_copy_progress(i, qty, dst_name)
@@ -361,16 +384,12 @@ def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
                 done_cnt[0] += 1
                 launched.append(final_path)
             except Exception as e:
-                errors.append(f"[{num}] Copy gagal: {e}")
+                errors.append(f"[{dst_name}] Copy gagal: {e}")
 
-        if cancelled_flag[0]:
-            return
-
+        # Launch semua yang berhasil di-copy (baik selesai semua maupun di-cancel)
         exe_name = "terminal64.exe" if mt_type == "MT5" else "terminal.exe"
         launch_errors = []
         for j, dst_path in enumerate(launched):
-            if cancelled_flag[0]:
-                break
             exe_path = dst_path / exe_name
             if on_launch_progress:
                 on_launch_progress(j, len(launched), dst_path.name, exe_name)
@@ -384,13 +403,12 @@ def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
                 except Exception as e:
                     launch_errors.append(f"[{dst_path.name}] {e}")
             if j < len(launched) - 1:
-                for _ in range(50):
-                    if cancelled_flag[0]:
-                        break
-                    time.sleep(0.1)
+                time.sleep(0.3)
 
-        if on_finish and not cancelled_flag[0]:
-            on_finish(done_cnt[0], qty, src_folder.name, errors + launch_errors)
+        if on_finish:
+            was_cancelled = cancelled_flag[0]
+            on_finish(done_cnt[0], qty, src_folder.name,
+                      errors + launch_errors, was_cancelled)
 
     threading.Thread(target=_do, daemon=True).start()
 
