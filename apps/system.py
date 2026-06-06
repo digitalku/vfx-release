@@ -95,8 +95,8 @@ AS_TRACK_OFF_BDR = "#3a4a5f"
 # ── Checkbox ──────────────────────────────────────────────────────────────────
 CHK_COL_WIDTH = 36
 CHK_FONT_SIZE = 14
-CHK_CHAR_OFF  = "\u2610"
-CHK_CHAR_ON   = "\u2611"
+CHK_CHAR_OFF  = "\u25a1"
+CHK_CHAR_ON   = "\u2713"
 TABLE_ROW_HEIGHT = 30
 
 # ── Archive types ─────────────────────────────────────────────────────────────
