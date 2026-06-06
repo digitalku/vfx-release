@@ -662,7 +662,7 @@ def wget_download_bg(url: str, dest_dir: Path,
 # ── MT Broker Download List ───────────────────────────────────────────────────
 # URL raw GitHub (bukan halaman HTML, tapi link "raw")
 MT_BROKER_LIST_URL = (
-    "https://raw.githubusercontent.com/dhimasbagus402/MT-List/main/MT_BROKER_LIST.txt"
+    "https://raw.githubusercontent.com/digitalku/vfxwelcome/refs/heads/master/MT_BROKER_LIST.txt"
 )
 
 
