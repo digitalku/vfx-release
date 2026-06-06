@@ -39,8 +39,8 @@ def save_config(data: dict):
 
 
 # ── Design Tokens ─────────────────────────────────────────────────────────────
-BG          = "#0d1114"
-BG2         = "#0d1114"
+BG          = "#0a0e11"
+BG2         = "#11181e"
 BG3         = "#171f26"
 BG4         = "#0d171f"
 ACCENT      = "#26b0ff"
@@ -54,8 +54,8 @@ BORDER2     = "#263045"
 DANGER      = "#ff5b5b"
 WARN        = "#f0a030"
 FG          = "#e8edf5"
-FG2         = "#8a95a8"
-FG3         = "#8590a6"
+FG2         = "#aeb9c9"
+FG3         = "#717c8f"
 WHITE       = "#ffffff"
 PURPLE      = "#a78bfa"
 
@@ -67,10 +67,9 @@ DOCS_DIR     = Path.home() / "Documents"
 TABLE_FONT_SIZE    = 10
 TABLE_HEADING_SIZE = 9
 TABLE_COLUMNS = [
-    ("name",     "NAME",     0,   "w",      True),
-    ("type",     "TYPE",     70,  "center", False),
-    ("size",     "SIZE",     80,  "e",      False),
-    ("modified", "MODIFIED", 100, "w",      False),
+    ("name",     "NAME",     0,   "w", True),
+    ("size",     "SIZE",     90,  "e", False),
+    ("modified", "MODIFIED", 130, "e", False),
 ]
 
 # ── Category ──────────────────────────────────────────────────────────────────
@@ -98,15 +97,19 @@ CHK_COL_WIDTH = 36
 CHK_FONT_SIZE = 14
 CHK_CHAR_OFF  = "\u25a1"
 CHK_CHAR_ON   = "\u25a0"
-TABLE_ROW_HEIGHT = 0
+TABLE_ROW_HEIGHT = 30
 
 # ── Archive types ─────────────────────────────────────────────────────────────
 EXTRACT_EXTS = {".zip", ".rar", ".tar", ".gz", ".bz2", ".xz", ".7z",
                 ".tar.gz", ".tar.bz2", ".tar.xz"}
 
 # ── Font ──────────────────────────────────────────────────────────────────────
-FONT        = "San Francisco"
-FONT_MONO   = "San Francisco"
+# Daftar prioritas; resolve_font() memakai yang pertama tersedia di sistem.
+# Entri terakhir ("Helvetica"/"Courier") selalu ada di Tk sebagai fallback.
+FONT        = ("Inter", "SF Pro Text", "Segoe UI", "Noto Sans",
+               "Ubuntu", "Cantarell", "DejaVu Sans", "Helvetica")
+FONT_MONO   = ("JetBrains Mono", "Cascadia Mono", "SF Mono", "Consolas",
+               "Noto Sans Mono", "DejaVu Sans Mono", "Courier")
 SIDEBAR_W   = 250
 
 

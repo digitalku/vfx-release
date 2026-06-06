@@ -281,8 +281,9 @@ class MTManager:
                      font=(f, 8), anchor="w").pack(anchor="w")
             var   = tk.StringVar(value=default)
             color = FG if key == "type" else (ACCENT if key == "path" else FG)
+            vfont = (fm, 10) if key == "path" else (f, 10, "bold")
             lbl   = tk.Label(col, textvariable=var, bg=BG2, fg=color,
-                             font=(f, 10, "bold"), anchor="w")
+                             font=vfont, anchor="w")
             lbl.pack(anchor="w")
             self._info_fields[key] = (var, lbl)
 
@@ -338,7 +339,7 @@ class MTManager:
         self.cat_tree.tag_configure("cut_dim",  foreground=FG3)
 
         self.file_tree = ttk.Treeview(tbl_box.inner,
-                                       columns=("name", "type", "size", "modified"),
+                                       columns=("name", "size", "modified"),
                                        show="headings", selectmode="browse",
                                        style="App.Treeview",
                                        yscrollcommand=self._on_file_scroll)
@@ -690,11 +691,10 @@ class MTManager:
         for row_idx, (label, fname, sz, mtime) in enumerate(rows):
             stripe = "row_even" if row_idx % 2 == 0 else "row_odd"
             iid    = f"r{row_idx}"
-            ext    = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
             self.chk_tree.insert("", "end", iid=iid, values=(CHK_CHAR_OFF,), tags=(stripe,))
             self.cat_tree.insert("", "end", iid=iid, values=(label,), tags=(label, stripe))
             self.file_tree.insert("", "end", iid=iid,
-                values=(fname, f".{ext}" if ext else "", sz, mtime), tags=(stripe,))
+                values=(fname, sz, mtime), tags=(stripe,))
 
     # ── Terminal helper ───────────────────────────────────────────────────────
     def _terminal(self, silent=False):
