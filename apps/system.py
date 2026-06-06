@@ -162,7 +162,7 @@ def extract_file(path: Path, dest_dir: Path) -> tuple[bool, str]:
             with zipfile.ZipFile(path, "r") as zf:
                 zf.extractall(dest_dir)
             return True, ""
-        return False, "xarchiver tidak ditemukan dan format tidak didukung oleh fallback."
+        return False, "xarchiver not found and the format is not supported by the fallback."
     except Exception as e:
         return False, str(e)
 
@@ -179,7 +179,7 @@ def yad_pick_file(title: str, filetypes: list[str], start_dir: Path,
     cmd = ["yad", "--file-selection",
            "--title", title,
            "--filename", str(start_dir) + "/",
-           "--button=Pilih:0", "--button=Batal:1"]
+           "--button=Select:0", "--button=Cancel:1"]
     if filetypes:
         # Buat label dari ekstensi: "*.ex4 *.ex5 *.mq4 *.mq5"
         exts  = " ".join(filetypes)
@@ -187,7 +187,7 @@ def yad_pick_file(title: str, filetypes: list[str], start_dir: Path,
         # Satu filter gabungan → semua ekstensi tampil sekaligus
         cmd += ["--file-filter", f"{label} | {exts}"]
         # Filter "Semua File" sebagai pilihan kedua
-        cmd += ["--file-filter", "Semua File | *"]
+        cmd += ["--file-filter", "All Files | *"]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if r.returncode == 0:
@@ -341,9 +341,9 @@ def run_mt_installer_bg(installer_path: Path, qty: int, base_name: str = "",
                         if silent_ok:
                             done_cnt += 1
                         else:
-                            errors.append(f"[{i+1}] Silent gagal (folder tidak terbuat).")
+                            errors.append(f"[{i+1}] Silent install failed (folder not created).")
                 except FileNotFoundError:
-                    errors.append(f"[{i+1}] wine tidak ditemukan")
+                    errors.append(f"[{i+1}] wine not found")
                     break
                 except Exception as e:
                     errors.append(f"[{i+1}] silent error: {e}")
@@ -355,7 +355,7 @@ def run_mt_installer_bg(installer_path: Path, qty: int, base_name: str = "",
                     proc.wait()
                     done_cnt += 1
                 except FileNotFoundError:
-                    errors.append(f"[{i+1}] wine tidak ditemukan")
+                    errors.append(f"[{i+1}] wine not found")
                     break
                 except Exception as e:
                     errors.append(f"[{i+1}] {e}")
@@ -413,7 +413,7 @@ def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
                 done_cnt[0] += 1
                 launched.append(final_path)
             except Exception as e:
-                errors.append(f"[{dst_name}] Copy gagal: {e}")
+                errors.append(f"[{dst_name}] Copy failed: {e}")
 
         # Launch semua yang berhasil di-copy (baik selesai semua maupun di-cancel)
         exe_name = "terminal64.exe" if mt_type == "MT5" else "terminal.exe"
@@ -423,7 +423,7 @@ def run_mt_duplicate_bg(src_folder: Path, base_name: str, linux_base: Path,
             if on_launch_progress:
                 on_launch_progress(j, len(launched), dst_path.name, exe_name)
             if not exe_path.exists():
-                launch_errors.append(f"[{dst_path.name}] {exe_name} tidak ditemukan")
+                launch_errors.append(f"[{dst_path.name}] {exe_name} not found")
             else:
                 try:
                     subprocess.Popen(
@@ -540,6 +540,22 @@ def scan_terminals_bg(on_result):
 
 
 # ── Autostart helpers ─────────────────────────────────────────────────────────
+def broker_already_installed(broker_name: str, version: str, terminals: list):
+    """Return terminal dict pertama yang cocok bila broker `broker_name`
+    dengan tipe MT `version` sudah terpasang, selain itu None.
+    Pencocokan sederhana: nama broker (lowercase) muncul sebagai substring
+    di nama terminal, dan tipe MT-nya sama (MT4 ≠ MT5 dianggap beda program)."""
+    key = (broker_name or "").strip().lower()
+    if not key:
+        return None
+    for t in terminals:
+        if t.get("type") != version:
+            continue
+        if key in (t.get("name") or "").lower():
+            return t
+    return None
+
+
 def autostart_desktop_path(t: dict) -> Path:
     safe = t["name"].replace(" ", "_").replace("/", "_")
     return AUTOSTART_DIR / f"{safe}.desktop"
@@ -735,10 +751,10 @@ def fetch_broker_list(timeout: int = 10) -> tuple[list, str]:
         result = [_parse_broker_line(line) for line in text.splitlines()]
         result = [r for r in result if r is not None]
         if not result:
-            return [], "File broker list kosong atau format tidak dikenali."
+            return [], "Broker list file is empty or in an unrecognized format."
         return result, ""
     except Exception as e:
-        return [], f"Gagal mengambil daftar broker: {e}"
+        return [], f"Failed to fetch broker list: {e}"
 
 
 def fetch_broker_list_bg():
@@ -775,7 +791,7 @@ def wget_then_install_bg(url: str, dest_dir: Path, broker_name: str,
             existing = {f for f in dest_dir.iterdir() if f.suffix.lower() == ".exe"} \
                        if dest_dir.exists() else set()
 
-            on_progress(f"Mengunduh {broker_name}\u2026")
+            on_progress(f"Downloading {broker_name}\u2026")
             result = subprocess.run(
                 ["wget", "-P", str(dest_dir), "--content-disposition", url],
                 capture_output=True, text=True, timeout=300,
@@ -783,7 +799,7 @@ def wget_then_install_bg(url: str, dest_dir: Path, broker_name: str,
             if result.returncode != 0:
                 err_lines = result.stderr.strip().splitlines()
                 err = err_lines[-1] if err_lines else f"exit {result.returncode}"
-                on_error(f"Unduh gagal: {err[:80]}")
+                on_error(f"Download failed: {err[:80]}")
                 return
 
             # Temukan file .exe baru (yang belum ada sebelumnya)
@@ -794,10 +810,10 @@ def wget_then_install_bg(url: str, dest_dir: Path, broker_name: str,
                 all_exe = sorted(after, key=lambda f: f.stat().st_mtime, reverse=True)
                 exe = all_exe[0] if all_exe else None
             if exe is None:
-                on_error("File .exe tidak ditemukan setelah unduh.")
+                on_error("File .exe not found after download.")
                 return
 
-            on_progress(f"Menjalankan installer {exe.name}\u2026")
+            on_progress(f"Running installer {exe.name}\u2026")
             exe_name = exe.name
             exe_path = exe   # simpan referensi sebelum thread lain
             try:
@@ -806,10 +822,10 @@ def wget_then_install_bg(url: str, dest_dir: Path, broker_name: str,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
             except FileNotFoundError:
-                on_error("wine tidak ditemukan. Install: sudo apt install wine")
+                on_error("wine not found. Install: sudo apt install wine")
                 return
             except Exception as e:
-                on_error(f"Gagal jalankan installer: {e}")
+                on_error(f"Failed to run installer: {e}")
                 return
 
             # Hapus .exe SETELAH proses Wine selesai (di thread daemon terpisah)
