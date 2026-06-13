@@ -10,9 +10,10 @@ import tkinter.font as tkf
 from tkinter import ttk
 from pathlib import Path
 import shutil
-import webbrowser
+import os
 
 import system as be
+import update as upd
 from widgets import (
     RoundedBox, RoundScrollbar, Tooltip, Badge, ProgressBar,
     make_pill_btn, themed_popup, resolve_font, get_font_obj,
@@ -558,7 +559,18 @@ class MTManager:
         self._disk_var = tk.StringVar(value="—")
         tk.Label(disk_fr, textvariable=self._disk_var, bg=BG2, fg=FG3,
                  font=(self._font_mono, 8)).pack(side="left", padx=(8, 0))
-        Tooltip(disk_fr, "Sisa ruang disk pada drive terminal terpilih")
+        self._disk_free_bytes  = 0
+        self._disk_total_bytes = 0
+        # Bind tooltip ke disk_fr + semua child-nya agar area hover lebih luas
+        self._disk_tooltips = [Tooltip(disk_fr, "Disk: belum diukur", delay=150)]
+        for _w in disk_fr.winfo_children():
+            self._disk_tooltips.append(Tooltip(_w, "Disk: belum diukur", delay=150))
+        # Refresh data disk setiap kali hover agar tooltip selalu up-to-date
+        def _on_disk_hover(e=None):
+            t = self._terminal(silent=True)
+            self._refresh_disk(t["path"] if t else None)
+        for _w in [disk_fr] + list(disk_fr.winfo_children()):
+            _w.bind("<Enter>", _on_disk_hover, add="+")
 
         self.auto_update_var = tk.BooleanVar(value=self._cfg.get("auto_update", True))
 
@@ -595,13 +607,7 @@ class MTManager:
                                  fill=ACCENT3, font=(self._font, 10, "bold"))
 
         def _run_update(_=None):
-            update_sh = Path.home() / "vfx" / "update.sh"
-            if not update_sh.exists():
-                themed_popup(self.root, "error", "Update Failed",
-                    f"Script not found:\n{update_sh}")
-                return
-            self._status("Running update...")
-            self._show_update_popup(update_sh)
+            upd.handle_update_click(self)
 
         update_c.bind("<Configure>", lambda e: _draw_update_btn())
         update_c.bind("<Enter>",     lambda e: _draw_update_btn(hover=True))
@@ -648,13 +654,20 @@ class MTManager:
 
     def _refresh_disk(self, path=None):
         free, total = be.disk_usage(path)
+        self._disk_free_bytes  = free
+        self._disk_total_bytes = total
         if total <= 0:
             self._disk_var.set("—")
             self._disk_bar._fill = BORDER2
             self._disk_bar._pct  = -1.0
             self._disk_bar.set(0.0)
+            if hasattr(self, "_disk_tooltips"):
+                for _t in self._disk_tooltips:
+                    _t.text = "Disk: tidak tersedia"
             return
         free_frac = free / total
+        used = total - free
+        to_kb = lambda b: f"{b / 1024:,.0f} KB"
         if free_frac < 0.10:
             color = DANGER
         elif free_frac < 0.20:
@@ -665,6 +678,15 @@ class MTManager:
         self._disk_bar._pct  = -1.0          # paksa redraw dengan warna baru
         self._disk_bar.set(1.0 - free_frac)
         self._disk_var.set(f"{be.fmt_disk(free)} free / {be.fmt_disk(total)}")
+        if hasattr(self, "_disk_tooltips"):
+            _tip = (
+                f"Free  : {to_kb(free)}\n"
+                f"Used  : {to_kb(used)}\n"
+                f"Total : {to_kb(total)}\n"
+                f"Usage : {(1 - free_frac) * 100:.1f}% used"
+            )
+            for _t in self._disk_tooltips:
+                _t.text = _tip
 
     def _disk_poll(self):
         t = self._terminal(silent=True)
@@ -868,7 +890,7 @@ class MTManager:
         Untuk Log, fname adalah relative path dari terminal root sehingga
         langsung di-join ke t['path']. Untuk kategori lain tetap pakai _folder_for.
         """
-        if cat == "Log":
+        if cat in ("Log", "History"):
             return Path(t["path"]) / fname
         return self._folder_for(t, cat) / fname
 
@@ -1306,7 +1328,7 @@ class MTManager:
         _confirm_delete_popup("Confirm Delete", "Delete this file?", 1, [fname], _do_single)
 
     # ── Clear Logs ────────────────────────────────────────────────────────────
-    def clear_logs(self):
+    def clear_logs_and_history(self):
         t = self._terminal()
         if not t:
             return
@@ -1334,7 +1356,7 @@ class MTManager:
             oh.pack(side="right", pady=8)
             w.update_idletasks(); self._center_win(w); w.deiconify(); w.lift(); w.focus_force()
 
-        # Kumpulkan semua folder logs yang akan di-scan
+        # ── Kumpulkan log files ───────────────────────────────────────────────
         _log_dirs = []
         if logs_dir and logs_dir.exists():
             _log_dirs.append(logs_dir)
@@ -1343,55 +1365,124 @@ class MTManager:
             _log_dirs.append(_tester_logs)
         _tester_dir = terminal_path / "Tester"
         if _tester_dir.exists():
-            for _agent_dir in sorted(_tester_dir.iterdir()):
-                if _agent_dir.is_dir() and _agent_dir.name.startswith("Agent"):
-                    _agent_logs = _agent_dir / "logs"
-                    if _agent_logs.exists():
-                        _log_dirs.append(_agent_logs)
-
-        if not _log_dirs:
-            _info_popup("Logs Not Found",
-                f"Logs folder not found:\n{logs_dir}\n\n"
-                "Make sure MT has been run at least once.",
-                icon="\u26a0", icon_fg=WARN)
-            return
+            try:
+                for _agent_dir in sorted(_tester_dir.iterdir()):
+                    if _agent_dir.is_dir() and _agent_dir.name.startswith("Agent"):
+                        _agent_logs = _agent_dir / "logs"
+                        if _agent_logs.exists():
+                            _log_dirs.append(_agent_logs)
+            except OSError:
+                pass
 
         log_files = []
         for _d in _log_dirs:
-            log_files.extend([lf for lf in _d.iterdir() if lf.is_file()])
-        if not log_files:
-            _info_popup("Logs Empty", "No log files in this terminal.")
+            try:
+                log_files.extend([lf for lf in _d.iterdir() if lf.is_file()])
+            except OSError:
+                pass
+
+        # ── Kumpulkan history files (.hcs) ────────────────────────────────────
+        def _ci_dir(parent, name):
+            lo = name.lower()
+            try:
+                for e in parent.iterdir():
+                    if e.is_dir() and e.name.lower() == lo:
+                        return e
+            except OSError:
+                pass
+            return None
+
+        _SKIP_ACCT = {"custom", "default"}
+        _history_roots = []
+        for _bname in ("bases", "Bases"):
+            _p = terminal_path / _bname
+            if _p.is_dir():
+                _history_roots.append((_p, True))
+                break
+        for _tname in ("Tester", "tester"):
+            _tp = terminal_path / _tname
+            if _tp.is_dir():
+                _tb = _ci_dir(_tp, "bases")
+                if _tb:
+                    _history_roots.append((_tb, False))
+                break
+
+        hcs_files = []
+        for _base_root, _apply_skip in _history_roots:
+            try:
+                _accounts = sorted(_base_root.iterdir(), key=lambda e: e.name)
+            except OSError:
+                continue
+            for _account in _accounts:
+                if not _account.is_dir():
+                    continue
+                if _apply_skip and _account.name.lower() in _SKIP_ACCT:
+                    continue
+                _hist_dir = _ci_dir(_account, "history")
+                if not _hist_dir:
+                    continue
+                try:
+                    _pairs = [e for e in _hist_dir.iterdir() if e.is_dir()]
+                except OSError:
+                    continue
+                for _pair in _pairs:
+                    try:
+                        hcs_files.extend([
+                            Path(e.path) for e in os.scandir(_pair)
+                            if e.is_file(follow_symlinks=False)
+                            and e.name.lower().endswith(".hcs")
+                        ])
+                    except OSError:
+                        continue
+
+        all_files   = log_files + hcs_files
+
+        # ── MT4: tambahkan history/*.hst (skip 'default'), tester/history/*.fxt,
+        #         dan tester/logs/*.log yang belum tercakup di atas ──
+        if t.get("type") == "MT4":
+            extra_logs, extra_history = be.collect_mt4_clear_extras(t)
+            log_files += extra_logs
+            hcs_files += extra_history
+            all_files += extra_logs + extra_history
+
+        if not all_files:
+            _info_popup("Tidak Ada File",
+                "Tidak ditemukan file log maupun history (.hcs) pada terminal ini.",
+                icon="\u26a0", icon_fg=WARN)
             return
 
-        total_kb  = sum(lf.stat().st_size for lf in log_files) / 1024
+        total_kb  = sum(lf.stat().st_size for lf in all_files if lf.exists()) / 1024
         total_str = f"{total_kb:.1f} KB" if total_kb < 1024 else f"{total_kb/1024:.2f} MB"
 
-        dlg = tk.Toplevel(self.root); dlg.title("Clear Logs"); dlg.configure(bg=BG)
+        # ── Dialog konfirmasi ─────────────────────────────────────────────────
+        dlg = tk.Toplevel(self.root); dlg.title("Clear Logs & History"); dlg.configure(bg=BG)
         dlg.resizable(False, False); dlg.attributes("-topmost", True)
         hdr = tk.Frame(dlg, bg=BG2, height=48); hdr.pack(fill="x"); hdr.pack_propagate(False)
         hdr_inner = tk.Frame(hdr, bg=BG2, padx=20); hdr_inner.pack(fill="both", expand=True)
-        tk.Label(hdr_inner, text="\u2015  Clear Logs",
+        tk.Label(hdr_inner, text="\u2015  Clear Logs & History",
                  bg=BG2, fg=WARN, font=(f, 12, "bold")).pack(side="left", fill="y")
         tk.Frame(dlg, bg=BORDER, height=1).pack(fill="x")
         body = tk.Frame(dlg, bg=BG, padx=24, pady=18); body.pack(fill="both", expand=True)
         info_box = tk.Frame(body, bg=BG3, padx=14, pady=10); info_box.pack(fill="x", pady=(0,14))
-        for label, val in [("Terminal", f"{t['type']} — {t['name']}"),
-                           ("Jumlah", f"{len(log_files)} file"),
+        for label, val in [("Terminal",  f"{t['type']} — {t['name']}"),
+                           ("Log files", f"{len(log_files)} file"),
+                           ("History",   f"{len(hcs_files)} file (.hcs)"),
                            ("Total size", total_str)]:
             row = tk.Frame(info_box, bg=BG3); row.pack(fill="x", pady=1)
             tk.Label(row, text=f"{label:<12}", bg=BG3, fg=FG3, font=(f, 9),
                      anchor="w", width=12).pack(side="left")
             tk.Label(row, text=val, bg=BG3, fg=FG2, font=(fm, 9), anchor="w").pack(side="left")
         tk.Frame(info_box, bg=BORDER, height=1).pack(fill="x", pady=(8,6))
-        for lf in log_files[:8]:
+        for lf in all_files[:8]:
             try:    _display = str(lf.relative_to(terminal_path))
             except: _display = lf.name
             tk.Label(info_box, text=f"  {_display}", bg=BG3, fg=FG3,
                      font=(fm, 8), anchor="w").pack(anchor="w")
-        if len(log_files) > 8:
-            tk.Label(info_box, text=f"  \u2026 and {len(log_files)-8} more file(s)",
+        if len(all_files) > 8:
+            tk.Label(info_box, text=f"  \u2026 and {len(all_files)-8} more file(s)",
                      bg=BG3, fg=FG3, font=(f, 8), anchor="w").pack(anchor="w")
-        tk.Label(body, text="All log files will be permanently deleted.\nThis action cannot be undone.",
+        tk.Label(body,
+                 text="Semua file log dan history (.hcs) akan dihapus permanen.\nTindakan ini tidak dapat dibatalkan.",
                  bg=BG, fg=FG2, font=(f, 9), justify="left", anchor="w").pack(anchor="w", pady=(0,4))
         tk.Frame(dlg, bg=BORDER, height=1).pack(fill="x")
         foot = tk.Frame(dlg, bg=BG2, height=50); foot.pack(fill="x"); foot.pack_propagate(False)
@@ -1400,27 +1491,27 @@ class MTManager:
         def _confirm():
             dlg.destroy()
             deleted, errors = 0, []
-            for lf in log_files:
+            for lf in all_files:
                 try: lf.unlink(); deleted += 1
                 except Exception as e: errors.append(f"{lf.name}: {e}")
             t_ref = self._terminal(silent=True)
             if t_ref:
                 self._reload_files(t_ref)
-            self._status(f"{deleted} log file(s) deleted from {t['name']}.")
+            self._status(f"{deleted} file(s) (log & history) deleted from {t['name']}.")
             # Result popup
-            res = tk.Toplevel(self.root); res.title("Logs Cleared"); res.configure(bg=BG)
+            res = tk.Toplevel(self.root); res.title("Logs & History Cleared"); res.configure(bg=BG)
             res.resizable(False, False); res.attributes("-topmost", True)
             ok_icon = "\u2713" if not errors else "\u26a0"
             ok_fg   = "#5ecf3e" if not errors else WARN
             hdr2 = tk.Frame(res, bg=BG2, height=48); hdr2.pack(fill="x"); hdr2.pack_propagate(False)
             hdr2i = tk.Frame(hdr2, bg=BG2, padx=20); hdr2i.pack(fill="both", expand=True)
-            tk.Label(hdr2i, text=f"{ok_icon}  Logs Cleared",
+            tk.Label(hdr2i, text=f"{ok_icon}  Logs & History Cleared",
                      bg=BG2, fg=ok_fg, font=(f, 12, "bold")).pack(side="left", fill="y")
             tk.Frame(res, bg=BORDER, height=1).pack(fill="x")
             body2 = tk.Frame(res, bg=BG, padx=24, pady=18); body2.pack(fill="both", expand=True)
             tk.Label(body2, text=ok_icon, bg=BG, fg=ok_fg,
                      font=(f, 22)).grid(row=0, column=0, rowspan=2, padx=(0,16), sticky="n")
-            tk.Label(body2, text=f"{deleted} log file(s) deleted successfully.",
+            tk.Label(body2, text=f"{deleted} file(s) deleted successfully.",
                      bg=BG, fg=FG, font=(f, 11, "bold"), anchor="w").grid(row=0, column=1, sticky="w")
             err_text = ("\n".join(errors[:3]) if errors else f"Dari terminal: {t['name']}")
             tk.Label(body2, text=err_text, bg=BG, fg=FG2 if not errors else DANGER,
@@ -1434,7 +1525,7 @@ class MTManager:
             oh.pack(side="right", pady=8)
             res.update_idletasks(); self._center_win(res); res.deiconify(); res.lift(); res.focus_force()
 
-        confirm_h, _ = make_pill_btn(fi, "\u2015  Clear All Logs", _confirm,
+        confirm_h, _ = make_pill_btn(fi, "\u2015  Clear All", _confirm,
                                      bg="#261a05", fg=WARN, hover_bg="#3d2a08",
                                      font_size=10, padx=20, pady=7, radius=7)
         confirm_h.pack(side="right", pady=8, padx=(0,6))
@@ -1786,7 +1877,7 @@ class MTManager:
     def _utility_menu(self):
         self._make_dropdown(
             self._utility_btn_holder,
-            [("\u2015  Clear Logs",      self.clear_logs),
+            [("\u2015  Clear Logs & History", self.clear_logs_and_history),
              ("\u270e  Open MetaEditor", self.open_metaeditor)],
             "_utility_popup_open")
 
@@ -2528,26 +2619,12 @@ class MTManager:
             icon_lbl.config(text="\u2717", fg=DANGER)
             msg_var.set("Update failed."); sub_var.set(msg[:72]); ok_h.pack(side="right", pady=8)
 
-        be.run_update_bg(update_sh,
-                         on_done=lambda au: win.after(0, lambda: _on_done(au)),
-                         on_fail=lambda m: win.after(0, lambda: _on_fail(m)))
+        upd.run_update_bg(update_sh,
+                          on_done=lambda au: win.after(0, lambda: _on_done(au)),
+                          on_fail=lambda m: win.after(0, lambda: _on_fail(m)))
 
     def _auto_update_check(self):
-        update_sh = Path.home() / "vfx" / "update.sh"
-        if not update_sh.exists():
-            return
-        self._status("Checking for updates automatically\u2026")
-
-        def _on_new():
-            self.root.after(0, lambda: self._show_auto_update_result(True))
-
-        def _on_current():
-            self.root.after(0, lambda: self._status("App is up-to-date."))
-
-        def _on_err(msg):
-            self.root.after(0, lambda m=msg: self._status(m))
-
-        be.run_auto_update_bg(update_sh, _on_new, _on_current, _on_err)
+        upd.auto_update_check(self)
 
     def _show_auto_update_result(self, has_update: bool):
         if not has_update:

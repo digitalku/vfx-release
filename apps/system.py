@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from urllib.request import urlopen, Request
 
-__version__ = "2.1"
+__version__ = "2.2"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path.home() / ".config" / "mt_manager" / "settings.json"
@@ -684,49 +684,198 @@ def scan_terminal_files(t: dict) -> list[tuple]:
                 rel = e.name
             rows.append(("Log", rel, sz, mtime))
 
+    # History (.hcs): scan Bases/[akun]/history/[pair]/ dan Tester/bases/[akun]/history/[pair]/
+    _history_roots = []
+    _bases = terminal_path / "bases"
+    if _bases.exists():
+        _history_roots.append(_bases)
+    _tester_bases = terminal_path / "Tester" / "bases"
+    if _tester_bases.exists():
+        _history_roots.append(_tester_bases)
+
+    for _base_root in _history_roots:
+        try:
+            _accounts = [e for e in _base_root.iterdir() if e.is_dir()]
+        except OSError:
+            continue
+        for _account in _accounts:
+            _hist_dir = _account / "history"
+            if not _hist_dir.exists():
+                continue
+            try:
+                _pairs = [e for e in _hist_dir.iterdir() if e.is_dir()]
+            except OSError:
+                continue
+            for _pair in _pairs:
+                try:
+                    entries = sorted(
+                        (e for e in os.scandir(_pair)
+                         if e.is_file(follow_symlinks=False)
+                         and e.name.lower().endswith(".hcs")),
+                        key=lambda e: e.name,
+                    )
+                except OSError:
+                    continue
+                for e in entries:
+                    try:
+                        st = e.stat()
+                    except OSError:
+                        continue
+                    kb = st.st_size / 1024
+                    sz = f"{kb:.1f} KB" if kb < 1024 else f"{kb / 1024:.2f} MB"
+                    mtime = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d")
+                    try:
+                        rel = str(Path(e.path).relative_to(terminal_path))
+                    except ValueError:
+                        rel = e.name
+                    rows.append(("History", rel, sz, mtime))
+
+    # MT4: history (skip 'default') + tester/history (.fxt) + tester/logs (.log)
+    rows.extend(_scan_mt4_history_tester(t))
+
     return rows
 
 
-# ── Update helpers ────────────────────────────────────────────────────────────
-def run_update_bg(update_sh: Path, on_done, on_fail):
-    """Jalankan update.sh, panggil on_done(already_updated) atau on_fail(msg)."""
-    def _run():
-        try:
-            proc = subprocess.run(
-                ["bash", str(update_sh)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            )
-            out = proc.stdout or ""
-            if proc.returncode != 0:
-                err = out.strip().splitlines()[-1] if out.strip() else f"exit {proc.returncode}"
-                on_fail(err)
-            elif "already up to date" in out.lower():
-                on_done(True)
-            else:
-                on_done(False)
-        except Exception as e:
-            on_fail(str(e))
-    threading.Thread(target=_run, daemon=True).start()
+def _find_dir_ci(parent: Path, name: str) -> Path | None:
+    """Cari subfolder di `parent` dengan nama `name` tanpa memperhatikan
+    huruf besar/kecil (MT4 dan MT5 punya konvensi penamaan folder berbeda
+    di Wine, misal 'Tester' vs 'tester', 'History' vs 'history')."""
+    if not parent.exists():
+        return None
+    direct = parent / name
+    if direct.exists() and direct.is_dir():
+        return direct
+    try:
+        for e in parent.iterdir():
+            if e.is_dir() and e.name.lower() == name.lower():
+                return e
+    except OSError:
+        pass
+    return None
 
 
-def run_auto_update_bg(update_sh: Path, on_new_update, on_current, on_error):
-    """Silent startup update check."""
-    def _run():
+def _scan_files_to_rows(folder: Path, terminal_path: Path, label: str,
+                         exts: tuple = None) -> list[tuple]:
+    """Scan file-file di `folder` (relative path dari terminal_path),
+    filter berdasarkan ekstensi jika `exts` diberikan."""
+    rows = []
+    try:
+        entries = sorted(
+            (e for e in os.scandir(folder) if e.is_file(follow_symlinks=False)),
+            key=lambda e: e.name,
+        )
+    except OSError:
+        return rows
+    for e in entries:
+        if exts and not e.name.lower().endswith(exts):
+            continue
         try:
-            proc = subprocess.run(
-                ["bash", str(update_sh)],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60,
-            )
-            out = proc.stdout or ""
-            if proc.returncode == 0 and "already up to date" not in out.lower():
-                on_new_update()
-            else:
-                on_current()
-        except subprocess.TimeoutExpired:
-            on_error("Auto-update: timeout.")
-        except Exception as e:
-            on_error(f"Auto-update: {e}")
-    threading.Thread(target=_run, daemon=True).start()
+            st = e.stat()
+        except OSError:
+            continue
+        kb = st.st_size / 1024
+        sz = f"{kb:.1f} KB" if kb < 1024 else f"{kb / 1024:.2f} MB"
+        mtime = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d")
+        try:
+            rel = str(Path(e.path).relative_to(terminal_path))
+        except ValueError:
+            rel = e.name
+        rows.append((label, rel, sz, mtime))
+    return rows
+
+
+def _scan_mt4_history_tester(t: dict) -> list[tuple]:
+    """Scan khusus MT4:
+      - /history/<server>/*.hst  (folder 'default' diabaikan)
+      - /tester/history/*.fxt
+      - /tester/logs/*.log
+    """
+    if t.get("type") != "MT4":
+        return []
+    rows = []
+    terminal_path = Path(t["path"])
+
+    # /history/<server>/*.hst — skip folder "default"
+    hist_root = _find_dir_ci(terminal_path, "history")
+    if hist_root:
+        try:
+            servers = [e for e in hist_root.iterdir()
+                       if e.is_dir() and e.name.lower() != "default"]
+        except OSError:
+            servers = []
+        for srv in sorted(servers, key=lambda p: p.name):
+            rows.extend(_scan_files_to_rows(srv, terminal_path, "History", (".hst",)))
+
+    # /tester/history/*.fxt
+    tester_root = _find_dir_ci(terminal_path, "tester")
+    if tester_root:
+        t_hist = _find_dir_ci(tester_root, "history")
+        if t_hist:
+            rows.extend(_scan_files_to_rows(t_hist, terminal_path, "History", (".fxt",)))
+
+        # /tester/logs/*.log
+        t_logs = _find_dir_ci(tester_root, "logs")
+        if t_logs:
+            rows.extend(_scan_files_to_rows(t_logs, terminal_path, "Log", (".log",)))
+
+    return rows
+
+
+def collect_mt4_clear_extras(t: dict) -> tuple[list[Path], list[Path]]:
+    """Untuk MT4, kumpulkan file tambahan yang harus dihapus oleh
+    Clear Logs & History (yang tidak tercakup oleh pengumpulan
+    logs_dir/Tester/bases standar):
+      - /history/<server>/*.hst   (folder 'default' diabaikan) -> history
+      - /tester/history/*.fxt                                   -> history
+      - /tester/logs/*.log                                      -> logs
+
+    Return (extra_log_files, extra_history_files) sebagai list of Path.
+    """
+    extra_logs: list[Path] = []
+    extra_history: list[Path] = []
+    if t.get("type") != "MT4":
+        return extra_logs, extra_history
+    terminal_path = Path(t["path"])
+
+    hist_root = _find_dir_ci(terminal_path, "history")
+    if hist_root:
+        try:
+            servers = [e for e in hist_root.iterdir()
+                       if e.is_dir() and e.name.lower() != "default"]
+        except OSError:
+            servers = []
+        for srv in servers:
+            try:
+                extra_history.extend([
+                    Path(e.path) for e in os.scandir(srv)
+                    if e.is_file(follow_symlinks=False) and e.name.lower().endswith(".hst")
+                ])
+            except OSError:
+                continue
+
+    tester_root = _find_dir_ci(terminal_path, "tester")
+    if tester_root:
+        t_hist = _find_dir_ci(tester_root, "history")
+        if t_hist:
+            try:
+                extra_history.extend([
+                    Path(e.path) for e in os.scandir(t_hist)
+                    if e.is_file(follow_symlinks=False) and e.name.lower().endswith(".fxt")
+                ])
+            except OSError:
+                pass
+
+        t_logs = _find_dir_ci(tester_root, "logs")
+        if t_logs:
+            try:
+                extra_logs.extend([
+                    Path(e.path) for e in os.scandir(t_logs)
+                    if e.is_file(follow_symlinks=False) and e.name.lower().endswith(".log")
+                ])
+            except OSError:
+                pass
+
+    return extra_logs, extra_history
 
 
 # ── wget download ─────────────────────────────────────────────────────────────
