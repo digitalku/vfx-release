@@ -1482,7 +1482,7 @@ class MTManager:
             tk.Label(info_box, text=f"  \u2026 and {len(all_files)-8} more file(s)",
                      bg=BG3, fg=FG3, font=(f, 8), anchor="w").pack(anchor="w")
         tk.Label(body,
-                 text="Semua file log dan history (.hcs) akan dihapus permanen.\nTindakan ini tidak dapat dibatalkan.",
+                 text="All log and history (.hcs) files will be permanently deleted.\nThis action cannot be undone.",
                  bg=BG, fg=FG2, font=(f, 9), justify="left", anchor="w").pack(anchor="w", pady=(0,4))
         tk.Frame(dlg, bg=BORDER, height=1).pack(fill="x")
         foot = tk.Frame(dlg, bg=BG2, height=50); foot.pack(fill="x"); foot.pack_propagate(False)
