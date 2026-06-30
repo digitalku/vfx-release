@@ -75,16 +75,27 @@ def auto_update_check(app):
     """
     update_sh = Path.home() / "vfx" / "update.sh"
     if not update_sh.exists():
+        # Tidak ada updater -> tak akan ada popup update, langsung cek What's New
+        # (mis. saat launch pertama setelah restart pasca-update manual).
+        app.root.after(0, app._whats_new_check)
         return
     app._status("Checking for updates automatically\u2026")
 
     def _on_new():
+        # Update baru terpasang -> tampilkan popup restart. What's New SENGAJA
+        # tidak dipanggil di sini; akan muncul pada launch berikutnya.
         app.root.after(0, lambda: app._show_auto_update_result(True))
 
     def _on_current():
-        app.root.after(0, lambda: app._status("App is up-to-date."))
+        def _ui():
+            app._status("App is up-to-date.")
+            app._whats_new_check()
+        app.root.after(0, _ui)
 
     def _on_err(msg):
-        app.root.after(0, lambda m=msg: app._status(m))
+        def _ui(m=msg):
+            app._status(m)
+            app._whats_new_check()
+        app.root.after(0, _ui)
 
     run_auto_update_bg(update_sh, _on_new, _on_current, _on_err)

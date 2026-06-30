@@ -17,6 +17,42 @@ from urllib.request import urlopen, Request
 
 __version__ = "2.2"
 
+# ── Changelog ───────────────────────────────────────────────────────────────
+# Data catatan rilis dipisah ke file changelog.json (di folder yang sama dengan
+# modul ini, sehingga ikut ter-update lewat git pull). Edit file itu untuk
+# menambah entri rilis — TIDAK perlu menyentuh kode di sini.
+CHANGELOG_PATH = Path(__file__).resolve().parent / "changelog.json"
+
+
+def load_changelog() -> list:
+    """Baca changelog.json. Kembalikan list entri, atau [] jika file
+    tidak ada / rusak (popup cukup tidak muncul, app tidak crash)."""
+    try:
+        data = json.loads(CHANGELOG_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _parse_version(v) -> tuple:
+    """'2.10' -> (2, 10). Bagian non-numerik diabaikan, aman untuk perbandingan."""
+    parts = []
+    for chunk in str(v).split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts) or (0,)
+
+
+def changelog_since(last_version):
+    """Entri changelog yang lebih baru dari last_version.
+    last_version None -> kembalikan SEMUA entri (mode changelog penuh)."""
+    entries = load_changelog()
+    if last_version is None:
+        return entries
+    lv = _parse_version(last_version)
+    return [e for e in entries if _parse_version(e.get("version", "0")) > lv]
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = Path.home() / ".config" / "mt_manager" / "settings.json"
 
@@ -31,11 +67,50 @@ def load_config() -> dict:
 
 
 def save_config(data: dict):
+    """Simpan settings.json secara ATOMIK: tulis ke file .tmp lalu rename.
+    Mencegah settings.json rusak/separuh jika proses mati saat menyimpan."""
     try:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(data, indent=2))
+        tmp = CONFIG_PATH.parent / (CONFIG_PATH.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, CONFIG_PATH)  # atomik pada filesystem yang sama
     except Exception:
         pass
+
+
+def cleanup_config_temp():
+    """Bersihkan file temp orphan di folder config:
+    - '.goutputstream-*' : sisa atomic-save editor GTK (gedit/xed/file manager)
+    - '*.tmp'            : sisa penyimpanan atomik app jika sempat terputus
+    Hanya yang sudah 'diam' >5 detik agar tak mengganggu penulisan yang berjalan."""
+    try:
+        d = CONFIG_PATH.parent
+        if not d.exists():
+            return
+        now = time.time()
+        for p in d.iterdir():
+            if not p.is_file():
+                continue
+            if p.name.startswith(".goutputstream-") or p.name.endswith(".tmp"):
+                try:
+                    if now - p.stat().st_mtime > 5:
+                        p.unlink()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+
+def get_seen_version():
+    """Versi changelog terakhir yang sudah dilihat user (None jika belum pernah)."""
+    return load_config().get("seen_version")
+
+
+def set_seen_version(v: str):
+    """Catat versi yang sudah dilihat agar popup tidak muncul lagi."""
+    cfg = load_config()
+    cfg["seen_version"] = str(v)
+    save_config(cfg)
 
 
 # ── Design Tokens ─────────────────────────────────────────────────────────────
@@ -56,6 +131,13 @@ WARN        = "#f0a030"
 FG          = "#e8edf5"
 FG2         = "#aeb9c9"
 FG3         = "#717c8f"
+
+# Map tag changelog -> (label badge, warna). Dipakai popup "What's New".
+CHANGELOG_TAGS = {
+    "new":     ("NEW",      ACCENT3),
+    "improve": ("IMPROVED", ACCENT),
+    "fix":     ("FIXED",    WARN),
+}
 WHITE       = "#ffffff"
 PURPLE      = "#a78bfa"
 
